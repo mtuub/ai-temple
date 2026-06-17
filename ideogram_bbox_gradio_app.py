@@ -151,10 +151,11 @@ def make_editor_value(prompt: dict, generation: dict | None = None) -> str:
         "__generation_settings": {
             "aspect_ratio": "1:1 (Square)",
             "megapixels": 1.0,
+            "multiple": 8,
             "seed": -1,
             "output_nid": DEFAULT_OUTPUT_NID,
-            "canvas_width": 1008,
-            "canvas_height": 1008,
+            "canvas_width": 1024,
+            "canvas_height": 1024,
             **(generation or {}),
         },
         "__generation_result": None,
@@ -386,13 +387,18 @@ def _generate_image_from_editor(
 
     aspect_ratio = generation["aspect_ratio"]
     megapixels_float = float(generation["megapixels"])
+    multiple_int = int(generation.get("multiple", 8))
     seed_int = int(generation["seed"])
     if seed_int == -1:
         seed_int = int(pipeline.generate_random_seed())
     output_nid_int = int(generation["output_nid"])
 
     w_updates = {
-        "37": {"aspect_ratio": aspect_ratio, "megapixels": megapixels_float},
+        "37": {
+            "aspect_ratio": aspect_ratio,
+            "megapixels": megapixels_float,
+            "multiple": multiple_int,
+        },
         "98:24": {"text": prompt_text},
         "98:18": {"noise_seed": seed_int},
     }

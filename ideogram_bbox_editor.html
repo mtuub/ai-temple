@@ -113,7 +113,7 @@
 
     .canvas-header-line {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: minmax(142px, 1.35fr) minmax(108px, 0.8fr) minmax(86px, 0.62fr) minmax(118px, 1fr);
       align-items: center;
       gap: 8px;
       width: 100%;
@@ -733,6 +733,9 @@
           <label class="canvas-header-field">Megapixels
             <input id="megapixels" type="number" min="0.1" max="4" step="0.1" value="1.0" aria-label="Megapixels">
           </label>
+          <label class="canvas-header-field">Multiple
+            <input id="multiple" type="number" min="1" max="64" step="1" value="8" aria-label="Multiple">
+          </label>
           <div class="canvas-header-field canvas-size-field">
             <span>Canvas:</span>
             <span class="canvas-size-value" id="canvasSize">1024 x 1024</span>
@@ -873,7 +876,7 @@
     const canvas = $("canvas");
     const ctx = canvas.getContext("2d");
     const fields = [
-      "aspectRatio", "megapixels", "seed",
+      "aspectRatio", "megapixels", "multiple", "seed",
       "high", "background", "aesthetics", "lighting",
       "photo", "medium", "stylePalette", "elType", "palette", "ymin",
       "xmin", "ymax", "xmax", "text", "desc"
@@ -884,6 +887,7 @@
       height: 1024,
       aspect_ratio: "1:1 (Square)",
       megapixels: 1.0,
+      multiple: 8,
       seed: -1,
       output_nid: 158,
       generation_result: null,
@@ -906,8 +910,9 @@
       return Math.max(min, Math.min(max, v));
     }
 
-    function roundToMultiple(value, multiple = 16) {
-      return Math.max(multiple, Math.round(value / multiple) * multiple);
+    function ceilToWorkflowMultiple(value, multiple = 8) {
+      const outputMultiple = Math.max(1, Math.round(Number(multiple) || 8)) * 2;
+      return Math.max(256, Math.ceil(value / outputMultiple) * outputMultiple);
     }
 
     function aspectRatioNumber(label) {
@@ -920,8 +925,8 @@
       const megapixels = Math.max(0.1, Number(state.megapixels) || 1);
       const ratio = aspectRatioNumber(state.aspect_ratio);
       const basePixels = 1024 * Math.sqrt(megapixels);
-      state.width = roundToMultiple(basePixels * Math.sqrt(ratio));
-      state.height = roundToMultiple(basePixels / Math.sqrt(ratio));
+      state.width = ceilToWorkflowMultiple(basePixels * Math.sqrt(ratio), state.multiple);
+      state.height = ceilToWorkflowMultiple(basePixels / Math.sqrt(ratio), state.multiple);
       const label = $("canvasSize");
       if (label) label.textContent = `${state.width} x ${state.height}`;
     }
@@ -1267,6 +1272,7 @@
       updateCanvasDimensions();
       $("aspectRatio").value = state.aspect_ratio;
       $("megapixels").value = Number(state.megapixels).toFixed(1);
+      $("multiple").value = Number(state.multiple) || 8;
       $("seed").value = state.seed;
       $("high").value = state.high;
       $("background").value = state.background;
@@ -1312,6 +1318,7 @@
     function syncStateFromGlobalFields() {
       state.aspect_ratio = $("aspectRatio").value;
       state.megapixels = Math.max(0.1, Number($("megapixels").value) || 1);
+      state.multiple = Math.max(1, Math.round(Number($("multiple").value) || 8));
       state.seed = Number($("seed").value);
       state.output_nid = 158;
       updateCanvasDimensions();
@@ -1379,6 +1386,7 @@
       return {
         aspect_ratio: state.aspect_ratio,
         megapixels: state.megapixels,
+        multiple: state.multiple,
         seed: state.seed,
         output_nid: state.output_nid,
         canvas_width: state.width,
@@ -1433,6 +1441,7 @@
     function loadGenerationSettings(settings = {}) {
       state.aspect_ratio = settings.aspect_ratio || state.aspect_ratio || "1:1 (Square)";
       state.megapixels = Number(settings.megapixels) || state.megapixels || 1;
+      state.multiple = Math.max(1, Math.round(Number(settings.multiple) || state.multiple || 8));
       state.seed = Number.isFinite(Number(settings.seed)) ? Number(settings.seed) : -1;
       state.output_nid = Number(settings.output_nid) || 158;
       updateCanvasDimensions();
