@@ -334,6 +334,13 @@
       transform: translateY(-1px);
     }
 
+    button:disabled,
+    button:disabled:hover {
+      opacity: 0.55;
+      cursor: not-allowed;
+      transform: none;
+    }
+
     button.primary {
       color: #062116;
       background: linear-gradient(135deg, #34d399, #8df4c1);
@@ -943,6 +950,13 @@
       if (label) label.textContent = `${state.width} x ${state.height}`;
     }
 
+    function parseSeedValue(value) {
+      const text = String(value ?? "").trim();
+      if (!text) return -1;
+      const seedValue = Number(text);
+      return Number.isFinite(seedValue) ? Math.max(-1, Math.round(seedValue)) : -1;
+    }
+
     function parsePalette(text) {
       return String(text || "")
         .split(",")
@@ -1331,7 +1345,7 @@
       state.aspect_ratio = $("aspectRatio").value;
       state.megapixels = Math.max(0.1, Number($("megapixels").value) || 1);
       state.multiple = Math.max(1, Math.round(Number($("multiple").value) || 8));
-      state.seed = Math.max(-1, Math.round(Number($("seed").value) || -1));
+      state.seed = parseSeedValue($("seed").value);
       state.output_nid = 158;
       updateCanvasDimensions();
       state.high = $("high").value;
@@ -1454,7 +1468,7 @@
       state.aspect_ratio = settings.aspect_ratio || state.aspect_ratio || "1:1 (Square)";
       state.megapixels = Number(settings.megapixels) || state.megapixels || 1;
       state.multiple = Math.max(1, Math.round(Number(settings.multiple) || state.multiple || 8));
-      state.seed = Number.isFinite(Number(settings.seed)) ? Math.max(-1, Math.round(Number(settings.seed))) : -1;
+      state.seed = parseSeedValue(settings.seed);
       state.output_nid = Number(settings.output_nid) || 158;
       updateCanvasDimensions();
     }
@@ -1613,6 +1627,8 @@
     });
 
     $("generateImage").addEventListener("click", async () => {
+      const generateButton = $("generateImage");
+      if (generateButton.disabled) return;
       refreshJson();
       setStatus("Generating");
       setGenerationStatus("Preparing generation...");
@@ -1627,6 +1643,7 @@
         return;
       }
 
+      generateButton.disabled = true;
       try {
         setGenerationStatus("Submitting workflow...");
         if (
@@ -1696,6 +1713,8 @@
         const message = error && error.message ? error.message : String(error);
         showGenerationResult({ error: true, status: message });
         setStatus("Generation failed");
+      } finally {
+        generateButton.disabled = false;
       }
     });
 
