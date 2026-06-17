@@ -1010,7 +1010,34 @@
       if (meta) meta.textContent = isError ? "Error" : message.split("\n")[0] || "Ready";
     }
 
+    function normalizeServerObject(value, fallbackStatus = "The server returned an empty response.") {
+      const unwrapped = unwrapServerResult(value);
+      if (unwrapped && typeof unwrapped === "object") return unwrapped;
+      return {
+        error: true,
+        state: "error",
+        progress: 100,
+        status: fallbackStatus,
+        image_url: "",
+        image_path: "",
+        result: {
+          error: true,
+          status: fallbackStatus,
+          image_url: "",
+          image_path: ""
+        }
+      };
+    }
+
     function showGenerationResult(result = {}) {
+      if (!result || typeof result !== "object") {
+        result = {
+          error: true,
+          status: "Generation returned no result.",
+          image_url: "",
+          image_path: ""
+        };
+      }
       state.generation_result = result;
       const image = $("resultImage");
       const empty = $("resultEmpty");
@@ -1043,7 +1070,14 @@
     function unwrapServerResult(value) {
       if (Array.isArray(value)) return unwrapServerResult(value[0]);
       if (value && Array.isArray(value.data)) return unwrapServerResult(value.data[0]);
-      if (value && value.result !== undefined) return unwrapServerResult(value.result);
+      if (
+        value &&
+        typeof value === "object" &&
+        value.result !== undefined &&
+        Object.keys(value).length === 1
+      ) {
+        return unwrapServerResult(value.result);
+      }
       if (typeof value === "string") {
         try {
           return JSON.parse(value);
@@ -1579,7 +1613,10 @@
           typeof server.get_generation_status === "function"
         ) {
           const editorValue = buildEditorValue();
-          const start = unwrapServerResult(await server.start_generation_from_editor(editorValue));
+          const start = normalizeServerObject(
+            await server.start_generation_from_editor(editorValue),
+            "Generation did not return a job id."
+          );
           if (!start || !start.job_id) {
             setGenerationStatus("Starting without live progress...");
             const result = await runDirectGeneration(editorValue);
@@ -1589,12 +1626,27 @@
           }
 
           let lastProgress = Number(start.progress) || 8;
+          let emptyPolls = 0;
           setProgress(lastProgress, true);
           setGenerationStatus(start.status || "Queued...");
 
           while (true) {
             await sleep(700);
             const update = unwrapServerResult(await server.get_generation_status(start.job_id));
+            if (!update || typeof update !== "object") {
+              emptyPolls += 1;
+              setGenerationStatus("Waiting for generation status...");
+              if (emptyPolls < 20) continue;
+              showGenerationResult({
+                error: true,
+                status: "Generation status stayed empty. The image may still have been saved locally.",
+                image_url: "",
+                image_path: ""
+              });
+              setStatus("Generation status lost");
+              break;
+            }
+            emptyPolls = 0;
             const progress = Number(update.progress);
             if (Number.isFinite(progress)) {
               lastProgress = Math.max(lastProgress, progress);
