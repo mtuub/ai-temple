@@ -78,18 +78,17 @@ def _extract_gradio_parts() -> tuple[str, str, str, dict]:
     # Push the current prompt into Gradio's component value whenever JSON refreshes.
     js = js.replace(
         """    function refreshJson() {
-      $("jsonOut").value = JSON.stringify(buildPrompt(), null, 2);
+      $("jsonOut").value = JSON.stringify(buildEditorValue(), null, 2);
     }
 """,
         """    let gradioChangeTimer = null;
 
     function refreshJson(notify = true) {
-      const prompt = buildPrompt();
-      const promptText = JSON.stringify(prompt, null, 2);
-      $("jsonOut").value = promptText;
+      const editorValue = buildEditorValue();
+      $("jsonOut").value = JSON.stringify(editorValue, null, 2);
       if (notify) {
         clearTimeout(gradioChangeTimer);
-        gradioChangeTimer = setTimeout(() => trigger("change", buildEditorValue()), 120);
+        gradioChangeTimer = setTimeout(() => trigger("change", editorValue), 120);
       }
     }
 """,

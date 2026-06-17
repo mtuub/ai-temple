@@ -1403,7 +1403,7 @@
     }
 
     function refreshJson() {
-      $("jsonOut").value = JSON.stringify(buildPrompt(), null, 2);
+      $("jsonOut").value = JSON.stringify(buildEditorValue(), null, 2);
     }
 
     function refreshAll() {
@@ -1689,7 +1689,7 @@
 
     $("importJson").addEventListener("click", () => {
       try {
-        loadPrompt(JSON.parse($("jsonOut").value));
+        loadEditorValue(JSON.parse($("jsonOut").value));
         setStatus("JSON imported");
       } catch (error) {
         setStatus(`Import failed: ${error.message}`);
