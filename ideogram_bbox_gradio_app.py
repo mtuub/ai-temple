@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+import hashlib
 import inspect
 import json
 import re
@@ -16,11 +17,23 @@ from gradio.processing_utils import move_files_to_cache
 APP_DIR = Path(__file__).resolve().parent
 SOURCE_HTML = APP_DIR / "ideogram_bbox_editor.html"
 DEFAULT_OUTPUT_NID = 158
+DEFAULT_GENERATION_SETTINGS = {
+    "aspect_ratio": "1:1 (Square)",
+    "megapixels": 1.0,
+    "multiple": 8,
+    "seed": -1,
+    "output_nid": DEFAULT_OUTPUT_NID,
+    "canvas_width": 1024,
+    "canvas_height": 1024,
+}
+EDITOR_METADATA_KEYS = {"__generation_settings", "__generation_result"}
 PIPELINE: Any | None = None
 EDITOR_COMPONENT: gr.HTML | None = None
 EXECUTOR = ThreadPoolExecutor(max_workers=2)
 GENERATION_JOBS: dict[str, dict[str, Any]] = {}
 GENERATION_JOBS_LOCK = threading.Lock()
+GENERATION_RESULT_CACHE: dict[str, dict[str, Any]] = {}
+GENERATION_RESULT_CACHE_LOCK = threading.Lock()
 ASPECT_RATIO_CHOICES = [
     "1:1 (Square)",
     "2:3 (Portrait Photo)",
@@ -145,30 +158,31 @@ def _extract_gradio_parts() -> tuple[str, str, str, dict]:
 HTML_TEMPLATE, CSS_TEMPLATE, JS_ON_LOAD, SAMPLE_PROMPT = _extract_gradio_parts()
 
 
+def _prompt_body(prompt: dict | None) -> dict:
+    if not isinstance(prompt, dict):
+        return {}
+    return {k: v for k, v in prompt.items() if k not in EDITOR_METADATA_KEYS}
+
+
 def make_editor_value(prompt: dict, generation: dict | None = None) -> str:
+    embedded_generation = {}
+    if isinstance(prompt, dict) and isinstance(prompt.get("__generation_settings"), dict):
+        embedded_generation = prompt["__generation_settings"]
     value = {
         "__generation_settings": {
-            "aspect_ratio": "1:1 (Square)",
-            "megapixels": 1.0,
-            "multiple": 8,
-            "seed": -1,
-            "output_nid": DEFAULT_OUTPUT_NID,
-            "canvas_width": 1024,
-            "canvas_height": 1024,
+            **DEFAULT_GENERATION_SETTINGS,
+            **embedded_generation,
             **(generation or {}),
         },
         "__generation_result": None,
-        **prompt,
+        **_prompt_body(prompt),
     }
     return json.dumps(value, ensure_ascii=False, indent=2)
 
 
 def parse_editor_value(value: dict | str | None) -> tuple[dict, dict]:
     if not value:
-        return (
-            SAMPLE_PROMPT,
-            json.loads(make_editor_value(SAMPLE_PROMPT))["__generation_settings"],
-        )
+        value = json.loads(make_editor_value(SAMPLE_PROMPT))
 
     if isinstance(value, str):
         try:
@@ -200,6 +214,11 @@ def parse_editor_value(value: dict | str | None) -> tuple[dict, dict]:
 
     if not isinstance(prompt, dict):
         raise gr.Error("Prompt must be a JSON object.")
+
+    embedded_generation = prompt.get("__generation_settings")
+    if isinstance(embedded_generation, dict):
+        generation = {**embedded_generation, **generation}
+    prompt = _prompt_body(prompt)
 
     defaults = json.loads(make_editor_value(SAMPLE_PROMPT))["__generation_settings"]
     generation = {**defaults, **generation}
@@ -294,6 +313,37 @@ def _make_progress_callback(job_id: str):
         )
 
     return progress_callback
+
+
+def _generation_cache_key(
+    prompt_text: str,
+    aspect_ratio: str,
+    megapixels: float,
+    multiple: int,
+    seed: int,
+    output_nid: int,
+) -> str:
+    payload = {
+        "prompt": prompt_text,
+        "aspect_ratio": aspect_ratio,
+        "megapixels": float(megapixels),
+        "multiple": int(multiple),
+        "seed": int(seed),
+        "output_nid": int(output_nid),
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _get_cached_generation_result(cache_key: str) -> dict | None:
+    with GENERATION_RESULT_CACHE_LOCK:
+        cached = GENERATION_RESULT_CACHE.get(cache_key)
+        return dict(cached) if cached else None
+
+
+def _set_cached_generation_result(cache_key: str, result: dict) -> None:
+    with GENERATION_RESULT_CACHE_LOCK:
+        GENERATION_RESULT_CACHE[cache_key] = dict(result)
 
 
 def generate_image_from_editor(editor_value: dict | str | None) -> dict:
@@ -391,6 +441,19 @@ def _generate_image_from_editor(
     if seed_int == -1:
         seed_int = int(pipeline.generate_random_seed())
     output_nid_int = int(generation["output_nid"])
+    cache_key = _generation_cache_key(
+        prompt_text,
+        aspect_ratio,
+        megapixels_float,
+        multiple_int,
+        seed_int,
+        output_nid_int,
+    )
+    cached_result = _get_cached_generation_result(cache_key)
+    if cached_result:
+        cached_result["cached"] = True
+        cached_result["status"] = f"Loaded cached result\nSeed: {seed_int}"
+        return cached_result
 
     w_updates = {
         "37": {
@@ -411,24 +474,39 @@ def _generate_image_from_editor(
 
     p_id = pipeline.execute(**execute_kwargs)
 
-    image_path = pipeline.get_output_path(
-        p_id=p_id,
-        output_nid=output_nid_int,
-        output_dir="output",
-        type="image",
-    )
+    try:
+        image_path = pipeline.get_output_path(
+            p_id=p_id,
+            output_nid=output_nid_int,
+            output_dir="output",
+            type="image",
+        )
+    except KeyError as exc:
+        cached_result = _get_cached_generation_result(cache_key)
+        if cached_result:
+            cached_result["cached"] = True
+            cached_result["status"] = f"Loaded cached result\nSeed: {seed_int}"
+            return cached_result
+        raise gr.Error(
+            f"ComfyUI did not return output node {output_nid_int}. "
+            "This can happen when an identical workflow is reused before the app has "
+            "a cached image for it. Try a new seed once, then repeated uses of that "
+            "same seed will load from the app cache."
+        ) from exc
 
     if not image_path:
         raise gr.Error("Generation finished, but no image path was returned.")
 
     image_url = _cache_image_url(str(image_path))
-    return {
+    result = {
         "error": False,
         "seed": seed_int,
         "image_path": str(image_path),
         "image_url": image_url,
         "status": f"Done\nSeed: {seed_int}",
     }
+    _set_cached_generation_result(cache_key, result)
+    return result
 
 
 APP_CSS = """
