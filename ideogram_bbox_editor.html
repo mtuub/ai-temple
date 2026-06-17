@@ -811,7 +811,7 @@
         <div class="section generate-section">
           <div class="section-title">Generate</div>
           <label>Seed
-            <input id="seed" type="number" step="1" value="-1">
+            <input id="seed" type="number" min="-1" step="1" value="-1">
           </label>
           <button class="primary" id="generateImage" type="button">Generate image</button>
         </div>
@@ -1331,7 +1331,7 @@
       state.aspect_ratio = $("aspectRatio").value;
       state.megapixels = Math.max(0.1, Number($("megapixels").value) || 1);
       state.multiple = Math.max(1, Math.round(Number($("multiple").value) || 8));
-      state.seed = Number($("seed").value);
+      state.seed = Math.max(-1, Math.round(Number($("seed").value) || -1));
       state.output_nid = 158;
       updateCanvasDimensions();
       state.high = $("high").value;
@@ -1454,7 +1454,7 @@
       state.aspect_ratio = settings.aspect_ratio || state.aspect_ratio || "1:1 (Square)";
       state.megapixels = Number(settings.megapixels) || state.megapixels || 1;
       state.multiple = Math.max(1, Math.round(Number(settings.multiple) || state.multiple || 8));
-      state.seed = Number.isFinite(Number(settings.seed)) ? Number(settings.seed) : -1;
+      state.seed = Number.isFinite(Number(settings.seed)) ? Math.max(-1, Math.round(Number(settings.seed))) : -1;
       state.output_nid = Number(settings.output_nid) || 158;
       updateCanvasDimensions();
     }
